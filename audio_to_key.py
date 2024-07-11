@@ -1,18 +1,23 @@
+import concurrent.futures
 import sounddevice as sd
 import numpy as np
 import keyboard
 import pygetwindow as gw
 import tkinter as tk
 from tkinter import ttk
+import speech_recognition as sr
+import asyncio
 
 # Variable for Threshold. Default sound level threshold
-threshold = 30                  
+threshold = 100
 # Default Key to press, variable can be changed
-key_to_press = 'l'              
+key_to_press = 'l'
 # Selected window title, can be changed
-selected_window_title = None    
+selected_window_title = None
 # Global variable to keep track of the audio stream
-audio_stream = None             
+audio_stream = None
+# Initialize the recognizer
+recognizer = sr.Recognizer()
 
 def is_game_focused(game_title):
     if game_title:
@@ -24,10 +29,31 @@ def is_game_focused(game_title):
 def audio_callback(indata, frames, time, status):
     global threshold, key_to_press, selected_window_title
     volume_norm = np.linalg.norm(indata) * 10
-    print(volume_norm)  # Optional: Print volume for debugging
+    #print(volume_norm)  # Optional: Print volume for debugging
     if volume_norm > threshold and is_game_focused(selected_window_title):
         print("Loud sound detected!")
-        keyboard.press(key_to_press)
+        keyboard.press(key_to_press)       
+    
+async def recognise_words():
+    def recognize_speech_from_mic(recognizer, microphone):
+        with microphone as source:
+            recognizer.adjust_for_ambient_noise(source)
+            audio = recognizer.listen(source)
+            try:
+                text = recognizer.recognize_google(audio)
+                print(f"Recognized speech: {text}")
+                # Check if the recognized speech matches a command
+                if "hello" in text.lower():
+                    keyboard.press("m")
+            except sr.UnknownValueError:
+                print("Google Speech Recognition could not understand audio")
+            except sr.RequestError as e:
+                print("Could not request results from Google Speech Recognition service; {0}".format(e))   
+
+    # Use ThreadPoolExecutor to run the blocking function in a separate thread
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(recognize_speech_from_mic, recognizer, sr.Microphone())
+        return await asyncio.wrap_future(future)  # Convert Future to asyncio Future and await it
 
 # Main function to start listening
 def listen_to_microphone():
@@ -36,6 +62,7 @@ def listen_to_microphone():
         audio_stream = sd.InputStream(callback=audio_callback)
         audio_stream.start()
         print("Started listening")
+    asyncio.run(recognise_words())
 
 # Function to stop listening
 def stop_listening():
@@ -50,7 +77,9 @@ def select_input_device():
     devices = sd.query_devices()
     print("Select input device:")
     for i, device in enumerate(devices):
-        print(f"{i}: {device['name']}")
+        if device["max_input_channels"] > 0:
+            print(f"{i}: {device['name']}")
+        
     return devices[int(input())]
 
 # Function to update the Key
